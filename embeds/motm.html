@@ -441,8 +441,8 @@
   }
   #nlMotm .nlsm__tallyhead .nlsm__tsub { font-size:12px; color:var(--text-muted); margin-top:2px; }
   #nlMotm .nlsm__trow {
-    display:grid; grid-template-columns:24px 1fr auto auto;
-    align-items:center; gap:10px; padding:8px 14px;
+    display:flex; align-items:center; gap:10px;
+    padding:9px 14px;
     font-size:14px;
     font-weight:700; font-variation-settings:'wght' 700;
     border-bottom:1px solid color-mix(in srgb, var(--border) 50%, transparent);
@@ -450,18 +450,47 @@
   #nlMotm .nlsm__trow:last-child { border-bottom:none; }
   #nlMotm .nlsm__trow.is-leader { background:color-mix(in srgb, var(--gold) 10%, var(--white)); }
   #nlMotm .nlsm__trow.is-you-pick { background:color-mix(in srgb, var(--primary) 5%, var(--white)); }
-  #nlMotm .nlsm__trow .nlsm__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }
-  #nlMotm .nlsm__trow .nlsm__pname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #nlMotm .nlsm__trow.is-leader.is-you-pick {
+    background:linear-gradient(90deg,
+      color-mix(in srgb, var(--gold) 10%, var(--white)) 0%,
+      color-mix(in srgb, var(--primary) 5%, var(--white)) 100%);
+  }
+  #nlMotm .nlsm__trow .nlsm__rank {
+    flex:none; width:18px; color:var(--text-muted);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlMotm .nlsm__trow .nlsm__pname {
+    flex:1; min-width:0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
   #nlMotm .nlsm__trow .nlsm__ptag {
+    flex:none;
     font-size:10px; color:var(--text-muted);
     text-transform:uppercase; letter-spacing:1px;
     font-weight:700; font-variation-settings:'wght' 700;
     padding:2px 6px; border:1px solid var(--border); border-radius:999px;
+    max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  #nlMotm .nlsm__trow.is-leader .nlsm__ptag { border-color:var(--gold); color:var(--gold); }
-  #nlMotm .nlsm__trow .nlsm__votes {
-    font-size:14px; font-weight:900; font-variation-settings:'wght' 900;
-    color:var(--text); min-width:28px; text-align:right;
+  #nlMotm .nlsm__trow .nlsm__leadpill {
+    flex:none;
+    font-size:10px;
+    text-transform:uppercase; letter-spacing:1px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    padding:2px 8px; border-radius:999px;
+    background:var(--gold); color:var(--white);
+  }
+  #nlMotm .nlsm__trow .nlsm__youpill {
+    flex:none;
+    font-size:10px;
+    text-transform:uppercase; letter-spacing:1px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    padding:2px 8px; border-radius:999px;
+    background:var(--white); color:var(--primary);
+    border:1px solid var(--primary);
+  }
+  @media (max-width:520px) {
+    #nlMotm .nlsm__trow { gap:8px; padding:9px 12px; }
+    #nlMotm .nlsm__trow .nlsm__ptag { display:none; }
   }
 
   /* Sim bar */
@@ -1359,21 +1388,26 @@
       });
   }
 
-  // ---------- per-match vote tally ----------
+  // ---------- per-match standings ----------
+  // Deliberately hides absolute vote counts to avoid the "2 votes" sad-face
+  // when turnout is low. Shows the top 5 names ranked by votes (sorted then
+  // ordered) and a "Leading" pill on #1 only when there's a clear leader
+  // (strictly more votes than #2). Ties at the top get no leader badge —
+  // it would just shout "no clear leader" if e.g. 3 fans each picked a
+  // different player.
+  var TALLY_TOP_N = 5;
   function renderTally() {
     if (!state.matches.length) { tallyEl.innerHTML = ''; return; }
     var now = simNow();
-    // Find the first match in voting/closed state on this matchday — show its tally
     var target = null;
     for (var i = 0; i < state.matches.length; i++) {
-      var s = stateOf(state.matches[i], now);
-      if (s === 'voting' || s === 'closed') { target = state.matches[i]; break; }
+      var st = stateOf(state.matches[i], now);
+      if (st === 'voting' || st === 'closed') { target = state.matches[i]; break; }
     }
     if (!target) { tallyEl.innerHTML = ''; return; }
     var entry = state.players[target.id];
     if (!entry || !entry.list) { tallyEl.innerHTML = ''; return; }
 
-    // Aggregate votes by playerId for this matchId across all users
     var counts = {};
     var totalVotes = 0;
     Object.keys(state.allVotesRaw).forEach(function (jwtId) {
@@ -1382,15 +1416,20 @@
       counts[v.playerId] = (counts[v.playerId] || 0) + 1;
       totalVotes += 1;
     });
+    var s = stateOf(target, now);
+    var statusLabel = s === 'voting' ? 'Man of the Match — Live' : 'Man of the Match — Final';
+    var matchLabel  = $h(target.attributes.homeTeam.name) + ' v ' + $h(target.attributes.awayTeam.name);
+
     if (!totalVotes) {
       tallyEl.className = 'nlsm__tally';
       tallyEl.innerHTML =
         '<div class="nlsm__tallyhead">' +
-          '<div class="nlsm__kicker">Vote tally</div>' +
-          '<div class="nlsm__tsub">No votes yet — be the first.</div>' +
+          '<div class="nlsm__kicker">' + $h(statusLabel) + '</div>' +
+          '<div class="nlsm__tsub">' + matchLabel + '</div>' +
         '</div>';
       return;
     }
+
     var rows = Object.keys(counts).map(function (pid) {
       var p = findPlayer(target.id, pid);
       return {
@@ -1398,32 +1437,37 @@
         name:     (p && p.name) || pid,
         teamId:   p && p.teamId,
         teamName: p && p.teamName,
-        votes:    counts[pid]
+        votes:    counts[pid]  // used to sort; never rendered
       };
-    }).sort(function (a, b) { return b.votes - a.votes; });
+    }).sort(function (a, b) {
+      if (b.votes !== a.votes) return b.votes - a.votes;
+      return a.name.localeCompare(b.name);
+    }).slice(0, TALLY_TOP_N);
 
-    var leaderVotes = rows[0].votes;
+    var topVotes    = rows[0].votes;
+    var secondVotes = rows[1] ? rows[1].votes : 0;
+    var hasClearLeader = (rows.length === 1) || (topVotes > secondVotes);
     var youPick = state.myVotes[target.id] && state.myVotes[target.id].playerId;
-
-    var s = stateOf(target, now);
-    var statusLabel = s === 'voting' ? 'Live tally' : 'Final tally';
 
     var inner =
       '<div class="nlsm__tallyhead">' +
         '<div class="nlsm__kicker">' + $h(statusLabel) + '</div>' +
-        '<div class="nlsm__tsub">' + totalVotes + ' vote' + (totalVotes === 1 ? '' : 's') + ' &middot; ' +
-          $h(target.attributes.homeTeam.name) + ' v ' + $h(target.attributes.awayTeam.name) +
-        '</div>' +
+        '<div class="nlsm__tsub">' + matchLabel + '</div>' +
       '</div>' +
       rows.map(function (r, i) {
+        var isLeader = hasClearLeader && i === 0;
+        var isYou    = r.playerId === youPick;
         var cls = 'nlsm__trow';
-        if (r.votes === leaderVotes) cls += ' is-leader';
-        if (r.playerId === youPick)  cls += ' is-you-pick';
+        if (isLeader) cls += ' is-leader';
+        if (isYou)    cls += ' is-you-pick';
+        var pills = '';
+        if (isLeader) pills += '<span class="nlsm__leadpill">Leading</span>';
+        if (isYou)    pills += '<span class="nlsm__youpill">Your pick</span>';
         return '<div class="' + cls + '">' +
           '<span class="nlsm__rank">' + (i + 1) + '</span>' +
           '<span class="nlsm__pname">' + $h(r.name) + '</span>' +
-          '<span class="nlsm__ptag">' + $h(r.teamName ? r.teamName : '') + '</span>' +
-          '<span class="nlsm__votes">' + r.votes + '</span>' +
+          '<span class="nlsm__ptag">' + $h(r.teamName || '') + '</span>' +
+          pills +
         '</div>';
       }).join('');
 
