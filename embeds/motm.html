@@ -520,18 +520,17 @@
 <script>
 (function () {
   // ---------- config ----------
-  // NOTE: shares the score-predictor Firebase project for now. The MOTM data
-  // tree (motm/...) is fully isolated from predictions/... so there's no
-  // overlap. Swap FIREBASE_CONFIG to a dedicated nl-motm project before
-  // launch — keep APP_NAME unique so the named-app guard avoids clashes.
+  // Shared nl-widgets Firebase project (also hosts the Score Predictor's
+  // predictions/ tree). MOTM data is isolated under motm/. APP_NAME stays
+  // unique per widget so two widgets on one page don't clash on init.
   var FIREBASE_CONFIG = {
-    apiKey:            'AIzaSyB3-woStjYeeEJxfGPXkoIaO48zCzQ3mA0',
-    authDomain:        'nl-score-predictor.firebaseapp.com',
-    databaseURL:       'https://nl-score-predictor-default-rtdb.europe-west1.firebasedatabase.app',
-    projectId:         'nl-score-predictor',
-    storageBucket:     'nl-score-predictor.firebasestorage.app',
-    messagingSenderId: '164767666899',
-    appId:             '1:164767666899:web:6a2320d96fa2dd2009fa26'
+    apiKey:            'AIzaSyAOePUiyfACJ546b08Z7oGWahAEYzEadMo',
+    authDomain:        'nl-widgets.firebaseapp.com',
+    databaseURL:       'https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app',
+    projectId:         'nl-widgets',
+    storageBucket:     'nl-widgets.firebasestorage.app',
+    messagingSenderId: '440054238126',
+    appId:             '1:440054238126:web:349a1aeaf3c65ff281563f'
   };
   var APP_NAME   = 'nlMotm';
   var FB_SDK_URL = 'https://www.gstatic.com/firebasejs/10.12.0/';
@@ -937,38 +936,89 @@
     grouped.forEach(function (g) { flat = flat.concat(g.teams); });
     return flat;
   }
+  // NL+ profile portal — where fans change their favourite team. After
+  // updating it there they need to sign out and back in for the new
+  // favourite_team JWT claim to reach this widget.
+  var NLPLUS_PORTAL_URL = 'https://signin.thenationalleague.org.uk/';
+
   function renderRegistration() {
     main.hidden = true; register.hidden = false;
-    var grouped = teamOptionsByComp();
     var flat    = allTeamsFlat();
-    var defaultId = '';
+    // Try to match JWT favourite_team against an NL team (case-insensitive).
+    // If it matches, we lock the UI to confirm-only — no dropdown, no
+    // alternative. If it doesn't, we fall back to the full dropdown.
+    var favMatch = null;
     if (state.user.favTeamName) {
-      var hit = flat.filter(function (o) { return o.name.toLowerCase() === state.user.favTeamName.toLowerCase(); })[0];
-      if (hit) defaultId = hit.id;
+      favMatch = flat.filter(function (o) {
+        return o.name.toLowerCase() === state.user.favTeamName.toLowerCase();
+      })[0] || null;
     }
-    var optgroupHTML = grouped.map(function (g) {
-      return '<optgroup label="' + $h(g.name) + '">' +
-        g.teams.map(function (o) {
-          return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
-        }).join('') +
-      '</optgroup>';
-    }).join('');
+    if (favMatch) renderRegistrationConfirm(favMatch);
+    else          renderRegistrationPicker();
+  }
+
+  // Confirm-only path: favourite_team is a current NL team. Just one button.
+  function renderRegistrationConfirm(team) {
+    var crest = team.crest
+      ? '<img src="' + $h(team.crest) + '" alt="' + $h(team.name) + '" ' +
+          'style="width:48px;height:48px;object-fit:contain;display:block;margin:0 auto 10px;" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">'
+      : '';
     register.innerHTML =
       '<div class="nlsm__register-card">' +
         '<div class="nlsm__hero" style="padding:0;">' +
           '<div class="nlsm__greetline">Man of the Match</div>' +
           '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
         '</div>' +
-        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
-          'Pick your team from the National, North or South division. You\'ll vote for the Man of the Match after each of your team\'s games.' +
+        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 18px;">' +
+          'Your NL+ profile is set to support the team below. Confirm to lock it for the season — you\'ll vote for the Man of the Match after each of their games.' +
         '</p>' +
+        '<div style="text-align:center;padding:18px 12px;background:var(--off-white);border:1px solid var(--border);border-radius:var(--radius);">' +
+          crest +
+          '<div style="font-size:18px;font-weight:900;font-variation-settings:\'wght\' 900;color:var(--text);">' + $h(team.name) + '</div>' +
+        '</div>' +
+        '<div class="nlsm__lockwarn">This locks for the season. Confirm carefully — you can\'t change your team later.</div>' +
+        '<button class="nlsm__btn" id="nlsm-register-btn" style="width:100%;">Confirm and lock my team</button>' +
+        '<p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;text-align:center;">' +
+          'Not your team? <a href="' + $h(NLPLUS_PORTAL_URL) + '" style="color:var(--primary);font-weight:700;font-variation-settings:\'wght\' 700;">Update your favourite team in NL+</a>' +
+          ', then sign out and back in.' +
+        '</p>' +
+      '</div>';
+
+    var btn = document.getElementById('nlsm-register-btn');
+    btn.addEventListener('click', function () { saveRegistration(team, btn); });
+  }
+
+  // Fallback path: no favourite_team claim, or it doesn't match an NL club.
+  // Show the full dropdown so the fan can still play this season.
+  function renderRegistrationPicker() {
+    var grouped = teamOptionsByComp();
+    var flat    = allTeamsFlat();
+    var optgroupHTML = grouped.map(function (g) {
+      return '<optgroup label="' + $h(g.name) + '">' +
+        g.teams.map(function (o) {
+          return '<option value="' + $h(o.id) + '">' + $h(o.name) + '</option>';
+        }).join('') +
+      '</optgroup>';
+    }).join('');
+    var hasFav = !!state.user.favTeamName;
+    var subline = hasFav
+      ? 'Your NL+ favourite team (<b>' + $h(state.user.favTeamName) + '</b>) isn\'t in the National, North or South divisions this season. Pick one to play.'
+      : 'Pick your team from the National, North or South division. You\'ll vote for the Man of the Match after each of your team\'s games.';
+    register.innerHTML =
+      '<div class="nlsm__register-card">' +
+        '<div class="nlsm__hero" style="padding:0;">' +
+          '<div class="nlsm__greetline">Man of the Match</div>' +
+          '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
+        '</div>' +
+        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' + subline + '</p>' +
         '<label for="nlsm-team-select">Your team</label>' +
         '<select id="nlsm-team-select">' +
           '<option value="">— choose a team —</option>' +
           optgroupHTML +
         '</select>' +
         '<div class="nlsm__lockwarn">This locks for the season. Pick carefully — you can\'t change your team later.</div>' +
-        '<button class="nlsm__btn" id="nlsm-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm and lock my team</button>' +
+        '<button class="nlsm__btn" id="nlsm-register-btn" disabled>Confirm and lock my team</button>' +
       '</div>';
 
     var sel = document.getElementById('nlsm-team-select');
@@ -978,17 +1028,21 @@
       var teamId = sel.value; if (!teamId) return;
       var team = flat.filter(function (o) { return o.id === teamId; })[0];
       if (!team) return;
-      btn.disabled = true; btn.textContent = 'Saving...';
-      var payload = {
-        teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
-        forename: state.user.forename, surnameInitial: state.user.surnameInitial,
-        email: state.user.email || '',
-        registeredAt: firebase.database.ServerValue.TIMESTAMP
-      };
-      fbDb.ref('users/' + state.user.id).set(payload).catch(function (err) {
-        btn.disabled = false; btn.textContent = 'Confirm and lock my team';
-        showBanner('Could not save registration: ' + err.message, 'err');
-      });
+      saveRegistration(team, btn);
+    });
+  }
+
+  function saveRegistration(team, btn) {
+    btn.disabled = true; btn.textContent = 'Saving...';
+    var payload = {
+      teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
+      forename: state.user.forename, surnameInitial: state.user.surnameInitial,
+      email: state.user.email || '',
+      registeredAt: firebase.database.ServerValue.TIMESTAMP
+    };
+    fbDb.ref('users/' + state.user.id).set(payload).catch(function (err) {
+      btn.disabled = false; btn.textContent = 'Confirm and lock my team';
+      showBanner('Could not save registration: ' + err.message, 'err');
     });
   }
 
